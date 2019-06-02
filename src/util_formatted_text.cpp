@@ -15,14 +15,14 @@
 
 using namespace util::text;
 
-std::shared_ptr<FormattedText> FormattedText::Create(const std::string &text)
+std::shared_ptr<FormattedText> FormattedText::Create(const std::string_view &text)
 {
 	auto ftext = std::shared_ptr<FormattedText>{new FormattedText{}};
 	ftext->AppendText(text);
 	return ftext;
 }
 
-void FormattedText::SetText(const std::string &text)
+void FormattedText::SetText(const std::string_view &text)
 {
 	Clear();
 	AppendText(text);
@@ -61,55 +61,158 @@ void FormattedText::Clear()
 {
 	m_textLines.clear();
 	m_tags.clear();
+	m_unformattedOffsetToLineIndex.clear();
+	m_formattedOffsetToLineIndex.clear();
+	m_bDirty = true;
+	if(m_callbacks.onTextCleared)
+		m_callbacks.onTextCleared();
+	if(m_callbacks.onTagsCleared)
+		m_callbacks.onTagsCleared();
 }
+bool FormattedText::operator==(const std::string_view &text) const
+{
+	TextOffset offset = 0;
+	for(auto lineIdx=decltype(m_textLines.size()){0u};lineIdx<m_textLines.size();++lineIdx)
+	{
+		auto &line = m_textLines.at(lineIdx);
+		auto &lineText = line->GetUnformattedLine().GetText();
+		if(offset >= text.length() || strncmp(text.data() +offset,lineText.c_str(),lineText.length()) != 0)
+			return false;
+		offset += line->GetAbsLength();
+		if(lineIdx == m_textLines.size() -1)
+		{
+			if((offset -1) != text.length())
+				return false;
+		}
+	}
+	return text.empty();
+}
+bool FormattedText::operator!=(const std::string_view &text) const {return operator==(text) == false;}
+FormattedText::operator std::string() const {return GetUnformattedText();}
 util::TSharedHandle<AnchorPoint> FormattedText::CreateAnchorPoint(LineIndex lineIdx,CharOffset charOffset,bool allowOutOfBounds)
 {
 	if(lineIdx >= m_textLines.size())
 		return {};
 	return m_textLines.at(lineIdx)->CreateAnchorPoint(charOffset,allowOutOfBounds);
 }
-
-std::string FormattedText::GetUnformattedText() const
+util::TSharedHandle<AnchorPoint> FormattedText::CreateAnchorPoint(TextOffset offset,bool allowOutOfBounds)
 {
-	std::stringstream result {};
-	auto first = true;
-	for(auto &line : m_textLines)
-	{
-		if(first)
-			first = false;
-		else
-			result<<'\n';
-		result<<line->GetUnformattedLine().GetText();
-	}
-	return result.str();
+	auto relOffset = GetRelativeCharOffset(offset);
+	if(relOffset.has_value() == false)
+		return nullptr;
+	return CreateAnchorPoint(relOffset->first,relOffset->second,allowOutOfBounds);
 }
 
-std::string FormattedText::GetFormattedText() const
+std::optional<TextOffset> FormattedText::GetFormattedTextOffset(TextOffset offset) const
 {
-	std::stringstream result {};
-	auto first = true;
+	/*if(offset >= m_unformattedOffsetToLineIndex.size())
+		return {};
+	auto lineIndex = m_unformattedOffsetToLineIndex.at(offset);
+	auto &pLine = m_textLines.at(lineIndex);
+	return pLine->GetFormattedCharOffset(offset -pLine->GetFormattedStartOffset());*/
+	auto relOffset = GetRelativeCharOffset(offset);
+	if(relOffset.has_value() == false)
+		return {};
+	auto &line = m_textLines.at(relOffset->first);
+	return line->GetFormattedCharOffset(relOffset->second);
+}
+std::optional<TextOffset> FormattedText::GetUnformattedTextOffset(TextOffset offset) const
+{
+	/*if(offset >= m_formattedOffsetToLineIndex.size())
+		return {};
+	auto lineIndex = m_formattedOffsetToLineIndex.at(offset);
+	auto &pLine = m_textLines.at(lineIndex);
+	return pLine->GetUnformattedCharOffset(offset -pLine->GetStartOffset());*/
 	for(auto &line : m_textLines)
 	{
-		if(first)
-			first = false;
-		else
-			result<<'\n';
-		auto &formattedLine = line->Format();
-		result<<formattedLine.GetText();
+		auto len = line->GetAbsFormattedLength();
+		if(offset >= len)
+		{
+			offset -= len;
+			continue;
+		}
+		return line->GetStartOffset() +line->GetUnformattedCharOffset(offset);
 	}
-	return result.str();
+	return {};
+}
+
+const std::string &FormattedText::GetUnformattedText() const
+{
+	UpdateTextInfo();
+	return m_textInfo.unformattedText;
+}
+
+const std::string &FormattedText::GetFormattedText() const
+{
+	UpdateTextInfo();
+	return m_textInfo.formattedText;
+}
+
+void FormattedText::UpdateTextOffsets(LineIndex lineStartIdx)
+{
+	auto &lines = GetLines();
+	TextOffset formattedOffset = 0;
+	TextOffset unformattedOffset = 0;
+	if(lineStartIdx > 0)
+	{
+		auto &prevLine = m_textLines.at(lineStartIdx -1);
+		unformattedOffset = prevLine->GetStartOffset() +prevLine->GetAbsLength();
+		formattedOffset = prevLine->GetFormattedStartOffset() +prevLine->GetAbsFormattedLength();
+	}
+	for(auto lineIndex=lineStartIdx;lineIndex<m_textLines.size();++lineIndex)
+	{
+		auto &line = m_textLines.at(lineIndex);
+		line->m_formattedStartOffset = formattedOffset;
+		auto len = line->GetAbsFormattedLength();
+		auto end = formattedOffset +len;
+		if(m_formattedOffsetToLineIndex.size() < end)
+			m_formattedOffsetToLineIndex.resize(std::max(end,formattedOffset +500));
+		std::fill(m_formattedOffsetToLineIndex.begin() +formattedOffset,m_formattedOffsetToLineIndex.begin() +formattedOffset +len,lineIndex);
+		formattedOffset += len;
+
+		auto startOffset = line->GetStartOffset();
+		len = line->GetAbsLength();
+		end = startOffset +len;
+		if(m_unformattedOffsetToLineIndex.size() < end)
+			m_unformattedOffsetToLineIndex.resize(std::max(end,startOffset +500));
+		std::fill(m_unformattedOffsetToLineIndex.begin() +startOffset,m_unformattedOffsetToLineIndex.begin() +startOffset +len,lineIndex);
+		unformattedOffset += len;
+	}
+	m_formattedOffsetToLineIndex.resize(formattedOffset);
+	m_unformattedOffsetToLineIndex.resize(unformattedOffset);
+}
+
+void FormattedText::UpdateTextInfo() const
+{
+	if(m_bDirty == false)
+		return;
+	m_bDirty = false;
+	m_textInfo.lineCount = 0u;
+	m_textInfo.charCount = 0u;
+	m_textInfo.unformattedText.clear();
+	m_textInfo.formattedText.clear();
+	auto &lines = GetLines();
+	for(auto &line : lines)
+	{
+		++m_textInfo.lineCount;
+		m_textInfo.charCount += line->GetAbsLength();
+		m_textInfo.unformattedText += line->GetUnformattedLine().GetText();
+		m_textInfo.formattedText += line->GetFormattedLine().GetText();
+		if(m_textInfo.lineCount != lines.size())
+		{
+			m_textInfo.unformattedText += '\n';
+			m_textInfo.formattedText += '\n';
+		}
+	}
 }
 
 std::optional<std::pair<LineIndex,CharOffset>> FormattedText::GetRelativeCharOffset(TextOffset absCharOffset) const
 {
-	for(auto &pLine : m_textLines)
-	{
-		auto relCharOffset = pLine->GetRelativeOffset(absCharOffset);
-		if(relCharOffset.has_value() == false)
-			continue;
-		return std::pair<LineIndex,CharOffset>{pLine->GetIndex(),*relCharOffset};
-	}
-	return {};
+	if(absCharOffset >= m_unformattedOffsetToLineIndex.size())
+		return {};
+	auto lineIdx = m_unformattedOffsetToLineIndex.at(absCharOffset);
+	auto &pLine = m_textLines.at(lineIdx);
+	return {{lineIdx,absCharOffset -pLine->GetStartOffset()}};
 }
 std::optional<TextOffset> FormattedText::GetTextCharOffset(LineIndex lineIdx,CharOffset charOffset) const
 {
@@ -134,7 +237,25 @@ std::optional<char> FormattedText::GetChar(TextOffset absCharOffset) const
 		return {};
 	return GetChar(relCharOffset->first,relCharOffset->second);
 }
-const std::vector<util::TSharedHandle<TextTag>> &FormattedText::GetTags() const {return m_tags;}
+const std::vector<PFormattedTextLine> &FormattedText::GetLines() const {return m_textLines;}
+FormattedTextLine *FormattedText::GetLine(LineIndex lineIdx) const
+{
+	if(lineIdx >= m_textLines.size())
+		return nullptr;
+	return m_textLines.at(lineIdx).get();
+}
+uint32_t FormattedText::GetLineCount() const
+{
+	UpdateTextInfo();
+	return m_textInfo.lineCount;
+}
+uint32_t FormattedText::GetCharCount() const
+{
+	UpdateTextInfo();
+	return m_textInfo.charCount;
+}
+const std::vector<util::TSharedHandle<TextTag>> &FormattedText::GetTags() const {return const_cast<FormattedText*>(this)->GetTags();}
+std::vector<util::TSharedHandle<TextTag>> &FormattedText::GetTags() {return m_tags;}
 void FormattedText::SetTagsEnabled(bool tagsEnabled)
 {
 	if(tagsEnabled)
@@ -158,7 +279,7 @@ bool FormattedText::ShouldPreserveTagsOnLineRemoval() const
 	return (static_cast<std::underlying_type_t<StateFlags>>(m_stateFlags) &static_cast<std::underlying_type_t<StateFlags>>(StateFlags::PreserveTagsOnLineRemoval)) != 0;
 }
 
-void FormattedText::RemoveLine(LineIndex lineIdx)
+void FormattedText::RemoveLine(LineIndex lineIdx,bool preserveTags)
 {
 	if(lineIdx >= m_textLines.size())
 		return;
@@ -179,6 +300,25 @@ void FormattedText::RemoveLine(LineIndex lineIdx)
 	// If this line is the first line, the next line's start anchor point's parent will be
 	// cleared automatically, so we don't have to do anything about it
 
+	// Find tags located in removed line, these will have to be moved into the next
+	// or previous line
+	std::string strTagComponents {};
+	if(preserveTags == true && ShouldPreserveTagsOnLineRemoval())
+	{
+		for(auto &tagComponent : line.GetTagComponents())
+			strTagComponents += tagComponent->GetTagString(*this);
+	}
+
+	auto pline = m_textLines.at(lineIdx);
+	m_textLines.erase(m_textLines.begin() +lineIdx);
+	for(auto i=lineIdx;i<m_textLines.size();++i)
+	{
+		auto &line = *m_textLines.at(i);
+		line.SetIndex(line.GetIndex() -1);
+	}
+
+	// The anchor points for the subsequent lines mustn't be updated before the line
+	// has actually been removed, otherwise line references may be incorrect
 	if(nextLine)
 	{
 		auto &nextLineAnchorStartPoint = nextLine->GetStartAnchorPoint();
@@ -187,23 +327,13 @@ void FormattedText::RemoveLine(LineIndex lineIdx)
 		if(prevLine)
 			nextLineAnchorStartPoint.SetPreviousLineAnchorStartPoint(prevLine->GetStartAnchorPoint());
 	}
+	
+	UpdateTextOffsets(lineIdx);
+	m_bDirty = true;
+	OnLineRemoved(*pline);
+	pline = nullptr; // Line has to be completely destroyed before tags are parsed again
 
-	// Find tags located in removed line, these will have to be moved into the next
-	// or previous line
-	std::string strTagComponents {};
-	if(ShouldPreserveTagsOnLineRemoval())
-	{
-		for(auto &tagComponent : line.GetTagComponents())
-			strTagComponents += tagComponent->GetTagString(*this);
-	}
-
-	m_textLines.erase(m_textLines.begin() +lineIdx);
-	for(auto i=lineIdx;i<m_textLines.size();++i)
-	{
-		auto &line = *m_textLines.at(i);
-		line.SetIndex(line.GetIndex() -1);
-	}
-	ParseTags(lineIdx,0,1);
+	// ParseTags(lineIdx,0,1);
 
 	// Move removed tags to next or previous line
 	if(strTagComponents.empty())
@@ -212,6 +342,7 @@ void FormattedText::RemoveLine(LineIndex lineIdx)
 	{
 		// Move to beginning of next line
 		InsertText(strTagComponents,lineIdx,0);
+		RemoveEmptyTags(lineIdx);
 		return;
 	}
 	if(lineIdx == 0)
@@ -223,6 +354,158 @@ void FormattedText::RemoveLine(LineIndex lineIdx)
 	auto prevLineIdx = lineIdx -1;
 	// Move to end of previous line
 	InsertText(strTagComponents,prevLineIdx);
+	RemoveEmptyTags(prevLineIdx,true);
+}
+
+void FormattedText::RemoveLine(LineIndex lineIdx) {RemoveLine(lineIdx,true);}
+
+TextOffset FormattedText::FindFirstVisibleChar(util::text::LineIndex lineIndex,bool fromEnd) const
+{
+	auto &line = m_textLines.at(lineIndex);
+	// Find first visible character
+	auto lineStartOffset = line->GetStartOffset();
+	auto &tagComponents = line->GetTagComponents();
+	auto &unformattedLine = line->GetUnformattedLine();
+	auto len = unformattedLine.GetLength();
+	if(fromEnd == false)
+	{
+		auto curTagIdx = 0u;
+		TextOffset offset = 0u;
+		while(offset < len)
+		{
+			if(curTagIdx < tagComponents.size())
+			{
+				auto &tagComponent = tagComponents.at(curTagIdx);
+				auto startOffset = tagComponent->GetStartAnchorPoint()->GetTextCharOffset() -lineStartOffset;
+				if(offset == startOffset)
+				{
+					offset += tagComponent->GetLength();
+					++curTagIdx;
+					continue;
+				}
+			}
+			break; // Visible character found!
+		}
+		return offset;
+	}
+	auto curTagIdx = tagComponents.empty() ? 0 : (tagComponents.size() -1);
+	TextOffset offset = (len > 0) ? (len -1) : 0;
+	while(offset >= 0)
+	{
+		if(curTagIdx < tagComponents.size())
+		{
+			auto &tagComponent = tagComponents.at(curTagIdx);
+			auto endOffset = tagComponent->GetEndAnchorPoint()->GetTextCharOffset() -lineStartOffset;
+			if(offset == endOffset)
+			{
+				offset -= tagComponent->GetLength();
+				--curTagIdx;
+				continue;
+			}
+		}
+		break; // Visible character found!
+	}
+	return offset;
+}
+
+void FormattedText::RemoveEmptyTags(util::text::LineIndex lineIndex,bool fromEnd)
+{
+	static auto skip = false;
+	if(skip)
+		return;
+	// Remove all empty tags
+	for(auto it=m_tags.begin();it!=m_tags.end();)
+	{
+		auto &hTag = *it;
+		if(hTag->IsValid() == false)
+		{
+			if(m_callbacks.onTagRemoved)
+				m_callbacks.onTagRemoved(*hTag);
+			it = m_tags.erase(it);
+			continue;
+		}
+		if(hTag->IsClosed() == false)
+		{
+			++it;
+			continue;
+		}
+		auto innerRange = hTag->GetInnerRange();
+		if(innerRange.has_value() == false)
+		{
+			// Tag is completely empty, we can just remove it in one step
+			auto outerRange = hTag->GetOuterRange();
+			auto result = outerRange.has_value();
+			if(result == true)
+			{
+				skip = true;
+				result = RemoveText(outerRange->first,outerRange->second -outerRange->first);
+				skip = false;
+			}
+			if(result)
+				RemoveEmptyTags(lineIndex); // Restart in case m_tags array has been changed
+			return;
+		}
+		else
+		{
+			auto &line = m_textLines.at(lineIndex);
+			auto offset = FindFirstVisibleChar(lineIndex,fromEnd);
+			auto rangeEndOffset = innerRange->first +innerRange->second -1;
+
+			// Check if there are any visible characters within the tag
+			if(offset <= rangeEndOffset)
+			{
+				// There are visible characters within the tag, which means we'll have to
+				// keep the tag
+				++it;
+				continue;
+			}
+			if(offset > rangeEndOffset || line->GetFormattedLength() == 0)
+			{
+				// There are no visible characters within the tag.
+
+				// Opening and closing tags have to be removed separately, because there may be
+				// other tags located between them! The closing tag will be removed first, because
+				// otherwise the tag would become invalid.
+				auto hTagCpy = hTag;
+				auto &closingTag = *hTag->GetClosingTagComponent();
+				auto closingTagStartOffset = closingTag.GetStartAnchorPoint()->GetTextCharOffset();
+				auto closingTagEndOffset = closingTag.GetEndAnchorPoint()->GetTextCharOffset();
+
+				auto &openingTag = *hTag->GetOpeningTagComponent();
+				auto openingTagStartOffset = openingTag.GetStartAnchorPoint()->GetTextCharOffset();
+				auto openingTagEndOffset = openingTag.GetEndAnchorPoint()->GetTextCharOffset();
+
+				skip = true;
+				// Closing tag has to be removed first to make sure the offsets don't become invalid
+				auto result = RemoveText(closingTagStartOffset,closingTagEndOffset -closingTagStartOffset +1) == true && RemoveText(openingTagStartOffset,openingTagEndOffset -openingTagStartOffset +1);
+				skip = false;
+				if(result)
+					RemoveEmptyTags(lineIndex); // Restart in case m_tags array has been changed
+				return;
+			}
+		}
+		++it;
+	}
+}
+
+bool FormattedText::RemoveText(TextOffset offset,TextLength len)
+{
+	if(len == 0)
+		return true;
+	auto endOffset = offset +len -1;
+	auto relStartOffset = GetRelativeCharOffset(offset);
+	auto relEndOffset = GetRelativeCharOffset(endOffset);
+	if(relStartOffset.has_value() == false || relEndOffset.has_value() == false)
+		return false;
+	auto endLineIdx = relEndOffset->first;
+	for(auto lineIdx=relStartOffset->first +1;lineIdx<relEndOffset->first;++lineIdx)
+	{
+		RemoveLine(lineIdx,false);
+		--endLineIdx;
+	}
+	if(endLineIdx != relStartOffset->first && RemoveText(endLineIdx,0,relEndOffset->second +1) == false)
+		return false;
+	return RemoveText(relStartOffset->first,relStartOffset->second,len);
 }
 
 bool FormattedText::RemoveText(LineIndex lineIdx,CharOffset charOffset,TextLength len)
@@ -242,7 +525,7 @@ bool FormattedText::RemoveText(LineIndex lineIdx,CharOffset charOffset,TextLengt
 		if(charOffset == 0)
 		{
 			// Range covers entire line, just delete it completely
-			RemoveLine(lineIdx);
+			RemoveLine(lineIdx,false);
 			return true;
 		}
 		auto lineLen = line.GetLength();
@@ -260,12 +543,13 @@ bool FormattedText::RemoveText(LineIndex lineIdx,CharOffset charOffset,TextLengt
 		return MoveText(nextLineIdx,0,nextLine.GetAbsLength(),lineIdx,charOffset);
 	}
 
-
-	
 	auto numErased = line.Erase(charOffset,len);
 	if(numErased.has_value() == false)
 		throw std::logic_error{"Discrepancy: Erasing failed, but 'CanErase' returned true."};
+	UpdateTextOffsets(lineIdx);
 	ParseTags(lineIdx,charOffset,1);
+	m_bDirty = true;
+	OnLineChanged(line);
 	return numErased.has_value();
 }
 
@@ -315,6 +599,23 @@ bool FormattedText::MoveText(LineIndex lineIdx,CharOffset startOffset,TextLength
 	return true;
 }
 
+void FormattedText::SetCallbacks(const Callbacks &callbacks) {m_callbacks = callbacks;}
+void FormattedText::OnLineAdded(FormattedTextLine &line)
+{
+	if(m_callbacks.onLineAdded)
+		m_callbacks.onLineAdded(line);
+}
+void FormattedText::OnLineRemoved(FormattedTextLine &line)
+{
+	if(m_callbacks.onLineRemoved)
+		m_callbacks.onLineRemoved(line);
+}
+void FormattedText::OnLineChanged(FormattedTextLine &line)
+{
+	if(m_callbacks.onLineChanged)
+		m_callbacks.onLineChanged(line);
+}
+
 LineIndex FormattedText::InsertLine(FormattedTextLine &line,LineIndex lineIdx)
 {
 	if(lineIdx > m_textLines.size())
@@ -334,6 +635,10 @@ LineIndex FormattedText::InsertLine(FormattedTextLine &line,LineIndex lineIdx)
 		startAnchorPoint.ClearParent();
 		startAnchorPoint.SetOffset(0);
 	}
+	// Usually SetOffset would already assign the correct line, however
+	// this does not work here because the line hasn't been added to m_textLines yet,
+	// so we have to assign the line manually.
+	startAnchorPoint.SetLine(line);
 	
 	// Set child anchor point
 	if(lineIdx < m_textLines.size())
@@ -349,13 +654,29 @@ LineIndex FormattedText::InsertLine(FormattedTextLine &line,LineIndex lineIdx)
 		auto &line = **it;
 		line.SetIndex(line.GetIndex() +1);
 	}
+	UpdateTextOffsets(lineIdx);
 	ParseTags(lineIdx);
+	m_bDirty = true;
+	OnLineAdded(*m_textLines.at(lineIdx));
 	return lineIdx;
 }
+void FormattedText::AppendText(const std::string_view &text) {InsertText(text,m_textLines.empty() ? LAST_LINE : (m_textLines.size() -1),LAST_CHAR);}
+void FormattedText::AppendLine(const std::string_view &line)
+{
+	auto strLine = std::string{line};
+	if(m_textLines.empty() == false)
+		strLine = '\n' +strLine;
+	InsertText(strLine,m_textLines.size());
+}
+void FormattedText::PopFrontLine() {RemoveLine(0);}
+void FormattedText::PopBackLine()
+{
+	if(m_textLines.empty())
+		return;
+	RemoveLine(m_textLines.size() -1);
+}
 
-void FormattedText::AppendText(const std::string &text) {InsertText(text,m_textLines.empty() ? LAST_LINE : (m_textLines.size() -1),LAST_CHAR);}
-
-bool FormattedText::InsertText(const std::string &text,LineIndex lineIdx,CharOffset charOffset)
+bool FormattedText::InsertText(const std::string_view &text,LineIndex lineIdx,CharOffset charOffset)
 {
 	if(text.empty())
 		return true;
@@ -369,7 +690,7 @@ bool FormattedText::InsertText(const std::string &text,LineIndex lineIdx,CharOff
 		return true;
 	if(lineIdx == m_textLines.size())
 	{
-		auto newLine = FormattedTextLine::Create();
+		auto newLine = FormattedTextLine::Create(*this);
 		InsertLine(*newLine,LAST_LINE);
 	}
 	auto &firstLineToInsert = lines.front();
@@ -379,13 +700,18 @@ bool FormattedText::InsertText(const std::string &text,LineIndex lineIdx,CharOff
 	auto anchorPointsInMoveRange = targetLineToInsert->DetachAnchorPoints(charOffset,UNTIL_THE_END);
 
 	auto numErased = targetLineToInsert->Erase(charOffset);
+	m_bDirty = true;
 	//ParseTags(lineIdx,charOffset,numErased.has_value() ? *numErased : 0);
 
 	auto textToInsert = firstLineToInsert->GetUnformattedLine().GetText();
 	auto insertedCharOffset = targetLineToInsert->InsertString(textToInsert,charOffset);
 	if(insertedCharOffset.has_value() == false)
 		return false;
+
+	UpdateTextOffsets(lineIdx);
 	ParseTags(lineIdx);//,*insertedCharOffset,textToInsert.length());
+
+	OnLineChanged(*targetLineToInsert);
 
 	m_textLines.reserve(m_textLines.size() +lines.size() -1);
 	auto lineIndexOffset = lineIdx +1;
@@ -396,15 +722,19 @@ bool FormattedText::InsertText(const std::string &text,LineIndex lineIdx,CharOff
 	auto &lastInsertedLine = m_textLines.at(lastInsertedLineIdx);
 	auto insertOffset = lastInsertedLine->AppendString(postfix);
 	lastInsertedLine->AttachAnchorPoints(anchorPointsInMoveRange,text.length());
+	if(postfix.empty() == false)
+		UpdateTextOffsets(lastInsertedLineIdx);
 	ParseTags(lastInsertedLineIdx,insertOffset);
+
+	OnLineChanged(*lastInsertedLine);
 	return true;
 }
 
-void FormattedText::ParseText(const std::string &text,std::vector<PFormattedTextLine> &outLines)
+void FormattedText::ParseText(const std::string_view &text,std::vector<PFormattedTextLine> &outLines)
 {
 	if(text.empty())
 		return;
-	outLines.push_back(FormattedTextLine::Create());
+	outLines.push_back(FormattedTextLine::Create(*this));
 	auto pCurLine = outLines.back();
 	TextOffset offset = 0;
 	while(offset < text.length())
@@ -413,7 +743,7 @@ void FormattedText::ParseText(const std::string &text,std::vector<PFormattedText
 		switch(c)
 		{
 			case '\n':
-				outLines.push_back(FormattedTextLine::Create());
+				outLines.push_back(FormattedTextLine::Create(*this));
 				pCurLine = outLines.back();
 				break;
 			default:
@@ -623,7 +953,7 @@ void FormattedText::UnitTest()
 		AppendText("ABC\n");
 		if(validate() == false) return false;
 		AppendText("JKL");
-		auto refPoint = CreateAnchorPoint(1,2);
+		auto refPoint = CreateAnchorPoint(1,2u);
 		if(validate() == false) return false;
 		InsertText("DEF\nGHI",1,0);
 		if(validate() == false) return false;
@@ -641,8 +971,8 @@ void FormattedText::UnitTest()
 		AppendText("ABC\n");
 		if(validate() == false) return false;
 		AppendText("JKLMNO");
-		auto refPoint0 = CreateAnchorPoint(1,1);
-		auto refPoint1 = CreateAnchorPoint(1,4);
+		auto refPoint0 = CreateAnchorPoint(1,1u);
+		auto refPoint1 = CreateAnchorPoint(1,4u);
 		if(validate() == false) return false;
 		InsertText("DEF\nGHI",1,3);
 		auto text = GetUnformattedText();
@@ -657,13 +987,13 @@ void FormattedText::UnitTest()
 
 	unit_test("LineRemoveFirst",[this,&assert_anchor_point,&assert_invalid_anchor_point,&validate](std::stringstream &msg) -> bool {
 		AppendText("Abc\n");
-		auto refPoint0 = CreateAnchorPoint(0,1);
+		auto refPoint0 = CreateAnchorPoint(0,1u);
 		if(validate() == false) return false;
 		AppendText("Def\n");
-		auto refPoint1 = CreateAnchorPoint(1,2);
+		auto refPoint1 = CreateAnchorPoint(1,2u);
 		if(validate() == false) return false;
 		AppendText("Ghi");
-		auto refPoint2 = CreateAnchorPoint(2,3);
+		auto refPoint2 = CreateAnchorPoint(2,3u);
 		if(validate() == false) return false;
 		RemoveLine(0);
 		auto text = GetUnformattedText();
@@ -678,13 +1008,13 @@ void FormattedText::UnitTest()
 
 	unit_test("LineRemoveMiddle",[this,&assert_anchor_point,&assert_invalid_anchor_point,&validate](std::stringstream &msg) -> bool {
 		AppendText("Abc\n");
-		auto refPoint0 = CreateAnchorPoint(0,0);
+		auto refPoint0 = CreateAnchorPoint(0,0u);
 		if(validate() == false) return false;
 		AppendText("Def\n");
-		auto refPoint1 = CreateAnchorPoint(1,0);
+		auto refPoint1 = CreateAnchorPoint(1,0u);
 		if(validate() == false) return false;
 		AppendText("Ghi");
-		auto refPoint2 = CreateAnchorPoint(2,0);
+		auto refPoint2 = CreateAnchorPoint(2,0u);
 		if(validate() == false) return false;
 		RemoveLine(1);
 		if(validate() == false) return false;
@@ -700,13 +1030,13 @@ void FormattedText::UnitTest()
 
 	unit_test("LineRemoveLast",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("Abc\n");
-		auto refPoint0 = CreateAnchorPoint(0,1);
+		auto refPoint0 = CreateAnchorPoint(0,1u);
 		if(validate() == false) return false;
 		AppendText("Def\n");
-		auto refPoint1 = CreateAnchorPoint(1,1);
+		auto refPoint1 = CreateAnchorPoint(1,1u);
 		if(validate() == false) return false;
 		AppendText("Ghi");
-		auto refPoint2 = CreateAnchorPoint(2,1);
+		auto refPoint2 = CreateAnchorPoint(2,1u);
 		if(validate() == false) return false;
 		RemoveLine(2);
 		auto text = GetUnformattedText();
@@ -772,9 +1102,9 @@ void FormattedText::UnitTest()
 	
 	unit_test("RemoveTextMiddle",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("abcdef\nghijkl\nmnopqr");
-		auto refPoint0 = CreateAnchorPoint(1,0);
-		auto refPoint1 = CreateAnchorPoint(1,1);
-		auto refPoint2 = CreateAnchorPoint(1,4);
+		auto refPoint0 = CreateAnchorPoint(1,0u);
+		auto refPoint1 = CreateAnchorPoint(1,1u);
+		auto refPoint2 = CreateAnchorPoint(1,4u);
 		if(validate() == false) return false;
 		RemoveText(1,1,3);
 		auto text = GetUnformattedText();
@@ -789,9 +1119,9 @@ void FormattedText::UnitTest()
 	
 	unit_test("RemoveTextNewline",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("abcdef\nghijkl\nmnopqr");
-		auto refPoint0 = CreateAnchorPoint(1,0);
-		auto refPoint1 = CreateAnchorPoint(1,1);
-		auto refPoint2 = CreateAnchorPoint(2,0);
+		auto refPoint0 = CreateAnchorPoint(1,0u);
+		auto refPoint1 = CreateAnchorPoint(1,1u);
+		auto refPoint2 = CreateAnchorPoint(2,0u);
 		if(validate() == false) return false;
 		RemoveText(1,5,2);
 		auto text = GetUnformattedText();
@@ -806,7 +1136,7 @@ void FormattedText::UnitTest()
 	
 	unit_test("RemoveTextMultipleNewline",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("abcdef\nghijkl\nmnopqr");
-		auto refPoint0 = CreateAnchorPoint(2,5);
+		auto refPoint0 = CreateAnchorPoint(2,5u);
 		if(validate() == false) return false;
 		RemoveText(1,5,2);
 		if(validate() == false) return false;
@@ -823,12 +1153,12 @@ void FormattedText::UnitTest()
 	
 	unit_test("MoveTextUp",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("abcd\nefgh\nijkl\nmnop\nqrst");
-		auto refPoint0 = CreateAnchorPoint(0,1);
-		auto refPoint1 = CreateAnchorPoint(1,2);
-		auto refPoint2 = CreateAnchorPoint(2,3);
-		auto refPoint3 = CreateAnchorPoint(3,0);
-		auto refPoint4 = CreateAnchorPoint(3,2);
-		auto refPoint5 = CreateAnchorPoint(4,3);
+		auto refPoint0 = CreateAnchorPoint(0,1u);
+		auto refPoint1 = CreateAnchorPoint(1,2u);
+		auto refPoint2 = CreateAnchorPoint(2,3u);
+		auto refPoint3 = CreateAnchorPoint(3,0u);
+		auto refPoint4 = CreateAnchorPoint(3,2u);
+		auto refPoint5 = CreateAnchorPoint(4,3u);
 		if(validate() == false) return false;
 		RemoveText(3,1,2);
 		if(validate() == false) return false;
@@ -858,9 +1188,9 @@ Move over several lines*/
 	
 	unit_test("MoveSameLine",[this,&validate,&assert_anchor_point,&assert_invalid_anchor_point](std::stringstream &msg) -> bool {
 		AppendText("abcdefghi");
-		auto refPoint0 = CreateAnchorPoint(0,0); // 'a'
-		auto refPoint1 = CreateAnchorPoint(0,2); // 'c'
-		auto refPoint2 = CreateAnchorPoint(0,7); // 'h'
+		auto refPoint0 = CreateAnchorPoint(0,0u); // 'a'
+		auto refPoint1 = CreateAnchorPoint(0,2u); // 'c'
+		auto refPoint2 = CreateAnchorPoint(0,7u); // 'h'
 		if(validate() == false) return false;
 		MoveText(0,1,3,0,8);
 		if(validate() == false) return false;
@@ -1003,10 +1333,12 @@ void FormattedText::DebugPrint(bool printTags) const
 		}
 		else
 		{
+			auto tagLineIdx = 0u;
 			for(auto &hTag : m_tags)
 			{
 				if(hTag.IsExpired())
 					continue;
+				++tagLineIdx;
 				auto outerRange = hTag->GetOuterRange();
 				if(outerRange.has_value() == false)
 					continue;

@@ -4,6 +4,7 @@
 
 #include "util_formatted_text_anchor_point.hpp"
 #include "util_formatted_text_line.hpp"
+#include "util_formatted_text.hpp"
 #include <algorithm>
 
 using namespace util::text;
@@ -26,28 +27,28 @@ bool AnchorPoint::operator<=(const AnchorPoint &other) const {return m_charOffse
 bool AnchorPoint::operator>=(const AnchorPoint &other) const {return m_charOffset >= other.m_charOffset;}
 
 LineIndex AnchorPoint::GetLineIndex() const {return GetLine().GetIndex();}
-TextOffset AnchorPoint::GetTextCharOffset() const {return m_charOffset;}
 FormattedTextLine &AnchorPoint::GetLine() const {return *m_wpLine.lock();}
 
-const std::vector<util::TWeakSharedHandle<AnchorPoint>> &AnchorPoint::GetChildren() const {return const_cast<AnchorPoint*>(this)->GetChildren();}
-std::vector<util::TWeakSharedHandle<AnchorPoint>> &AnchorPoint::GetChildren() {return m_children;}
 void AnchorPoint::SetLine(FormattedTextLine &line)
 {
 	ClearLine();
 	line.AttachAnchorPoint(*this);
 	m_wpLine = line.shared_from_this();
 }
-AnchorPoint *AnchorPoint::GetParent()
+LineStartAnchorPoint *AnchorPoint::GetParent()
 {
-	return m_parent.IsValid() ? m_parent.Get() : nullptr;
+	return m_parent.IsValid() ? static_cast<LineStartAnchorPoint*>(m_parent.Get()) : nullptr;
 }
-void AnchorPoint::SetParent(AnchorPoint &parent)
+void AnchorPoint::SetParent(LineStartAnchorPoint &parent)
 {
 	if(&parent == this)
 		throw std::logic_error("Anchor cannot be the parent of itself!");
 	ClearParent();
+
+	auto offset = GetTextCharOffset();
 	parent.m_children.push_back(m_handle);
 	m_parent = parent.GetHandle();
+	SetOffset(offset); // Re-apply offset
 }
 bool AnchorPoint::ShouldAllowOutOfBounds() const {return m_bAllowOutOfBounds;}
 bool AnchorPoint::IsInRange(TextOffset startOffset,TextLength len) const
@@ -60,8 +61,11 @@ void AnchorPoint::ClearParent()
 {
 	if(m_parent.IsExpired())
 		return;
-	auto *parent = m_parent.Get();
+	auto offset = GetTextCharOffset();
+	auto *parent = static_cast<LineStartAnchorPoint*>(m_parent.Get());
 	parent->RemoveChild(*this);
+	m_parent = {};
+	SetOffset(offset); // Re-apply offset
 }
 void AnchorPoint::ClearLine()
 {
@@ -73,8 +77,39 @@ bool AnchorPoint::IsAttachedToLine(FormattedTextLine &line) const
 {
 	return (m_wpLine.expired() == false) && m_wpLine.lock().get() == &line;
 }
+bool AnchorPoint::IsLineStartAnchorPoint() const {return false;}
+TextOffset AnchorPoint::GetTextCharOffset() const
+{
+	auto offset = m_charOffset;
+	if(m_parent.IsValid())
+		offset += m_parent->GetTextCharOffset();
+	return offset;
+}
+void AnchorPoint::ShiftToOffset(TextOffset offset)
+{
+	auto delta = static_cast<ShiftOffset>(offset) -static_cast<ShiftOffset>(GetTextCharOffset());
+	ShiftByOffset(delta);
+}
 
-void AnchorPoint::RemoveChild(const AnchorPoint &anchorPoint)
+void AnchorPoint::ShiftByOffset(ShiftOffset offset) {SetOffset(GetTextCharOffset() +offset);}
+void AnchorPoint::SetOffset(TextOffset offset)
+{
+	TextOffset baseOffset = 0;
+	if(m_parent.IsValid())
+		baseOffset = m_parent->GetTextCharOffset();
+	m_charOffset = offset -baseOffset;
+	if(m_wpLine.expired() || ShouldAllowOutOfBounds())
+		return;
+	auto &text = m_wpLine.lock()->GetTargetText();
+	auto relOffset = text.GetRelativeCharOffset(offset);
+	m_wpLine = relOffset.has_value() ? text.GetLine(relOffset->first)->shared_from_this() : std::weak_ptr<FormattedTextLine>{};
+}
+
+////////////
+
+const std::vector<util::TWeakSharedHandle<AnchorPoint>> &LineStartAnchorPoint::GetChildren() const {return const_cast<LineStartAnchorPoint*>(this)->GetChildren();}
+std::vector<util::TWeakSharedHandle<AnchorPoint>> &LineStartAnchorPoint::GetChildren() {return m_children;}
+void LineStartAnchorPoint::RemoveChild(const AnchorPoint &anchorPoint)
 {
 	auto it = std::find_if(m_children.begin(),m_children.end(),[&anchorPoint](const util::TWeakSharedHandle<AnchorPoint> &hChild) {
 		return hChild.IsValid() && hChild.Get() == &anchorPoint;
@@ -82,41 +117,17 @@ void AnchorPoint::RemoveChild(const AnchorPoint &anchorPoint)
 	if(it == m_children.end())
 		return;
 	m_children.erase(it);
-}
 
-void AnchorPoint::ShiftToOffset(TextOffset offset)
-{
-	auto delta = static_cast<ShiftOffset>(offset) -static_cast<ShiftOffset>(m_charOffset);
-	ShiftByOffset(delta);
 }
-
-void AnchorPoint::ShiftByOffset(ShiftOffset offset)
+void LineStartAnchorPoint::ShiftByOffset(ShiftOffset offset)
 {
-	// TODO: What if offset < 0 or > line size?
-	m_charOffset += offset;
-	for(auto it=m_children.begin();it!=m_children.end();)
+	// Faster than recursion
+	auto *pNextLineAnchorStartPoint = this;
+	while(pNextLineAnchorStartPoint)
 	{
-		auto &wpChild = *it;
-		if(wpChild.IsExpired())
-		{
-			it = m_children.erase(it);
-			continue;
-		}
-		auto &child = *wpChild.Get();
-		child.ShiftByOffset(offset);
-		++it;
+		pNextLineAnchorStartPoint->SetOffset(pNextLineAnchorStartPoint->GetTextCharOffset() +offset);
+		pNextLineAnchorStartPoint = pNextLineAnchorStartPoint->GetNextLineAnchorStartPoint();
 	}
-}
-void AnchorPoint::SetOffset(TextOffset offset) {m_charOffset = offset;}
-
-////////////
-
-void LineStartAnchorPoint::SetPreviousLineAnchorStartPoint(LineStartAnchorPoint &anchor)
-{
-	if(&anchor == GetParent())
-		return;
-	SetParent(anchor);
-	anchor.SetNextLineAnchorStartPoint(*this);
 }
 void LineStartAnchorPoint::SetNextLineAnchorStartPoint(LineStartAnchorPoint &anchor)
 {
@@ -128,18 +139,27 @@ void LineStartAnchorPoint::SetNextLineAnchorStartPoint(LineStartAnchorPoint &anc
 	m_nextLineAnchorStartPoint = anchor.GetHandle();
 	anchor.SetPreviousLineAnchorStartPoint(*this);
 }
-void LineStartAnchorPoint::ClearPreviousLineAnchorStartPoint()
-{
-	ClearParent();
-}
+bool LineStartAnchorPoint::IsLineStartAnchorPoint() const {return true;}
 void LineStartAnchorPoint::ClearNextLineAnchorStartPoint()
 {
-	if(m_nextLineAnchorStartPoint.IsExpired())
-		return;
-	RemoveChild(*m_nextLineAnchorStartPoint);
+	m_nextLineAnchorStartPoint = {};
 }
-LineStartAnchorPoint *LineStartAnchorPoint::GetPreviousLineAnchorStartPoint() {return static_cast<LineStartAnchorPoint*>(GetParent());}
 LineStartAnchorPoint *LineStartAnchorPoint::GetNextLineAnchorStartPoint()
 {
 	return m_nextLineAnchorStartPoint.IsExpired() ? nullptr : static_cast<LineStartAnchorPoint*>(m_nextLineAnchorStartPoint.Get());
 }
+void LineStartAnchorPoint::ClearPreviousLineAnchorStartPoint()
+{
+	m_prevLineAnchorStartPoint = {};
+}
+void LineStartAnchorPoint::SetPreviousLineAnchorStartPoint(LineStartAnchorPoint &anchor)
+{
+	if(&anchor == this)
+		throw std::logic_error("Previous anchor cannot be itself!");
+	if(&anchor == GetPreviousLineAnchorStartPoint())
+		return;
+	ClearPreviousLineAnchorStartPoint();
+	m_prevLineAnchorStartPoint = anchor.GetHandle();
+	anchor.SetNextLineAnchorStartPoint(*this);
+}
+LineStartAnchorPoint *LineStartAnchorPoint::GetPreviousLineAnchorStartPoint() {return static_cast<LineStartAnchorPoint*>(m_prevLineAnchorStartPoint.Get());}

@@ -11,9 +11,9 @@
 
 using namespace util::text;
 
-PFormattedTextLine FormattedTextLine::Create(const std::string &line)
+PFormattedTextLine FormattedTextLine::Create(FormattedText &text,const std::string &line)
 {
-	return PFormattedTextLine{new FormattedTextLine{line}};
+	return PFormattedTextLine{new FormattedTextLine{text,line}};
 }
 FormattedTextLine::~FormattedTextLine()
 {
@@ -24,7 +24,8 @@ FormattedTextLine::~FormattedTextLine()
 	}
 	m_anchorPoints.clear();
 }
-FormattedTextLine::FormattedTextLine(const std::string &line)
+FormattedTextLine::FormattedTextLine(FormattedText &text,const std::string &line)
+	: m_text{text}
 {
 	if(line.empty())
 		return;
@@ -56,7 +57,11 @@ void FormattedTextLine::AttachAnchorPoint(AnchorPoint &anchorPoint)
 }
 
 const TextLine &FormattedTextLine::GetFormattedLine() const {return const_cast<FormattedTextLine*>(this)->GetFormattedLine();}
-TextLine &FormattedTextLine::GetFormattedLine() {return m_formattedLine;}
+TextLine &FormattedTextLine::GetFormattedLine()
+{
+	Format();
+	return m_formattedLine;
+}
 
 const TextLine &FormattedTextLine::GetUnformattedLine() const {return const_cast<FormattedTextLine*>(this)->GetUnformattedLine();}
 TextLine &FormattedTextLine::GetUnformattedLine() {return m_unformattedLine;}
@@ -69,6 +74,7 @@ const LineStartAnchorPoint &FormattedTextLine::GetStartAnchorPoint() const {retu
 LineStartAnchorPoint &FormattedTextLine::GetStartAnchorPoint() {return static_cast<LineStartAnchorPoint&>(*m_startAnchorPoint);}
 
 bool FormattedTextLine::IsEmpty() const {return m_unformattedLine.GetLength() == 0;}
+TextOffset FormattedTextLine::GetFormattedStartOffset() const {return m_formattedStartOffset;}
 TextOffset FormattedTextLine::GetStartOffset() const {return m_startAnchorPoint->GetTextCharOffset();}
 TextOffset FormattedTextLine::GetEndOffset() const
 {
@@ -79,8 +85,12 @@ TextOffset FormattedTextLine::GetEndOffset() const
 TextOffset FormattedTextLine::GetAbsEndOffset() const {return GetStartOffset() +(GetAbsLength() -1);}
 TextLength FormattedTextLine::GetAbsLength() const {return m_unformattedLine.GetAbsLength();}
 TextLength FormattedTextLine::GetLength() const {return m_unformattedLine.GetLength();}
+TextLength FormattedTextLine::GetAbsFormattedLength() const {return m_formattedLine.GetAbsLength();}
+TextLength FormattedTextLine::GetFormattedLength() const {return m_formattedLine.GetLength();}
 std::optional<CharOffset> FormattedTextLine::GetRelativeOffset(TextOffset offset) const
 {
+	if(offset == END_OF_TEXT)
+		return GetAbsEndOffset();
 	if(IsInRange(offset) == false)
 		return {};
 	return offset -GetStartOffset();
@@ -215,14 +225,21 @@ void FormattedTextLine::AppendCharacter(char c)
 	m_bDirty = true;
 }
 
+FormattedText &FormattedTextLine::GetTargetText() const {return m_text;}
+
 TextLine &FormattedTextLine::Format()
 {
 	if(m_bDirty == false)
 		return m_formattedLine;
 	m_bDirty = false;
 	m_formattedLine.Clear();
+	m_unformattedCharIndexToFormatted.clear();
+	m_formattedCharIndexToUnformatted.clear();
 	auto len = m_unformattedLine.GetLength();
 	m_formattedLine.Reserve(len);
+	m_unformattedCharIndexToFormatted.resize(m_unformattedLine.GetAbsLength());
+	m_formattedCharIndexToUnformatted.reserve(m_unformattedLine.GetAbsLength());
+	auto lineStartOffset = GetStartOffset();
 	auto lineView = std::string_view{m_unformattedLine.GetText()};
 
 	auto curTagIdx = 0u;
@@ -232,24 +249,51 @@ TextLine &FormattedTextLine::Format()
 		if(curTagIdx < m_tagComponents.size())
 		{
 			auto &tagComponent = m_tagComponents.at(curTagIdx);
-			auto startOffset = tagComponent->GetStartAnchorPoint()->GetTextCharOffset();
+			auto startOffset = tagComponent->GetStartAnchorPoint()->GetTextCharOffset() -lineStartOffset;
 			if(offset == startOffset)
 			{
+				auto formattedIdx = m_formattedLine.GetLength();
+				if(tagComponent->IsClosingTag() && formattedIdx > 0)
+					--formattedIdx;
+				for(auto i=offset;i<std::min(offset +tagComponent->GetLength(),len);++i)
+					m_unformattedCharIndexToFormatted.at(i) = formattedIdx;
 				offset += tagComponent->GetLength();
 				++curTagIdx;
 				continue;
 			}
 		}
 		auto c = m_unformattedLine.At(offset);
+		m_unformattedCharIndexToFormatted.at(offset) = m_formattedLine.GetLength();
+		m_formattedCharIndexToUnformatted.push_back(offset);
 		m_formattedLine.AppendCharacter(c);
 		++offset;
 	}
+	for(auto i=offset;i<m_unformattedCharIndexToFormatted.size();++i)
+		m_unformattedCharIndexToFormatted.at(i) = m_formattedLine.GetLength();
 	return m_formattedLine;
+}
+
+CharOffset FormattedTextLine::GetFormattedCharOffset(CharOffset offset) const
+{
+	if(offset == m_unformattedCharIndexToFormatted.size())
+		return m_formattedLine.GetLength(); // New-line or EOF
+	if(offset > m_unformattedCharIndexToFormatted.size())
+		return LAST_CHAR;
+	return m_unformattedCharIndexToFormatted.at(offset);
+}
+
+CharOffset FormattedTextLine::GetUnformattedCharOffset(CharOffset offset) const
+{
+	if(offset == m_formattedCharIndexToUnformatted.size())
+		return m_unformattedLine.GetLength(); // New-line or EOF
+	if(offset > m_formattedCharIndexToUnformatted.size())
+		return LAST_CHAR;
+	return m_formattedCharIndexToUnformatted.at(offset);
 }
 
 util::TSharedHandle<AnchorPoint> FormattedTextLine::CreateAnchorPoint(CharOffset charOffset,bool allowOutOfBounds)
 {
-	if(allowOutOfBounds == false && charOffset >= GetLength())
+	if(allowOutOfBounds == false && charOffset > GetLength())
 		return {};
 	auto anchorPoint = AnchorPoint::Create(*this);
 	anchorPoint->SetOffset(GetStartOffset() +charOffset);

@@ -25,6 +25,7 @@ namespace util
 		static const LineIndex INVALID_LINE_INDEX = LAST_LINE;
 		static const CharOffset LAST_CHAR = std::numeric_limits<CharOffset>::max();
 		static const TextLength UNTIL_THE_END = std::numeric_limits<TextLength>::max();
+		static const TextOffset END_OF_TEXT = std::numeric_limits<TextOffset>::max();
 
 		class AnchorPoint;
 

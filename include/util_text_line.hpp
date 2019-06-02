@@ -20,11 +20,6 @@ namespace util
 	{
 		class FormattedText;
 		class FormattedTextLine;
-		class TextSubLine
-		{
-			std::string_view m_;
-		};
-
 		class TextLine
 		{
 		public:
@@ -65,7 +60,6 @@ namespace util
 		private:
 			std::string m_line = "";
 			std::vector<CharFlags> m_charFlags = {};
-			// Sublines
 		};
 		using PTextLine = std::shared_ptr<TextLine>;
 	};

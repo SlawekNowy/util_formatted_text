@@ -94,7 +94,7 @@ void FormattedText::ParseTags(LineIndex lineIdx,CharOffset offset,TextLength len
 			it = m_tags.erase(it);
 			continue;
 		}
-		// TODO: What if tag invalid? (e.g. has closing tag but no opening tag)
+
 		auto &tag = *hTag;
 		auto removeTag = tag.IsValid() == false;
 		if(removeTag == false)
@@ -145,6 +145,8 @@ void FormattedText::ParseTags(LineIndex lineIdx,CharOffset offset,TextLength len
 				newTagComponents.insert(itInsert,tag.m_closingTag);
 			}
 
+			if(m_callbacks.onTagRemoved)
+				m_callbacks.onTagRemoved(*hTag);
 			hTag.Remove();
 			it = m_tags.erase(it);
 			continue;
@@ -175,6 +177,15 @@ void FormattedText::ParseTags(LineIndex lineIdx,CharOffset offset,TextLength len
 			});
 			if(it != newOpenTags.rend())
 				(*it)->SetClosingTagComponent(hTagComponent);
+		}
+	}
+	if(m_callbacks.onTagAdded)
+	{
+		for(auto &hTag : newOpenTags)
+		{
+			if(hTag.IsExpired())
+				continue;
+			m_callbacks.onTagAdded(*hTag);
 		}
 	}
 }

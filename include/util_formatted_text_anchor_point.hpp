@@ -15,6 +15,7 @@ namespace util
 	namespace text
 	{
 		class FormattedTextLine;
+		class LineStartAnchorPoint;
 		class AnchorPoint
 		{
 		public:
@@ -35,19 +36,17 @@ namespace util
 			bool operator<=(const AnchorPoint &other) const;
 			bool operator>=(const AnchorPoint &other) const;
 			
-			std::vector<util::TWeakSharedHandle<AnchorPoint>> &GetChildren();
-			const std::vector<util::TWeakSharedHandle<AnchorPoint>> &GetChildren() const;
 			void SetLine(FormattedTextLine &line);
-			AnchorPoint *GetParent();
-			void SetParent(AnchorPoint &parent);
+			LineStartAnchorPoint *GetParent();
+			void SetParent(LineStartAnchorPoint &parent);
 			void ClearParent();
 			void ClearLine();
 			bool IsAttachedToLine(FormattedTextLine &line) const;
-
+			virtual bool IsLineStartAnchorPoint() const;
 			bool IsInRange(TextOffset startOffset,TextLength len) const;
 			bool ShouldAllowOutOfBounds() const;
 
-			void ShiftByOffset(ShiftOffset offset);
+			virtual void ShiftByOffset(ShiftOffset offset);
 			void ShiftToOffset(TextOffset offset);
 			void SetOffset(TextOffset offset);
 
@@ -55,12 +54,10 @@ namespace util
 		protected:
 			AnchorPoint(TextOffset charOffset=0,bool allowOutOfBounds=false);
 			AnchorPoint(const AnchorPoint&)=delete;
-			void RemoveChild(const AnchorPoint &anchorPoint);
 		private:
 			TextOffset m_charOffset = 0u;
 			bool m_bAllowOutOfBounds = false;
 			std::weak_ptr<FormattedTextLine> m_wpLine = {};
-			std::vector<util::TWeakSharedHandle<AnchorPoint>> m_children = {};
 			util::TWeakSharedHandle<AnchorPoint> m_parent = {};
 
 			util::TWeakSharedHandle<AnchorPoint> m_handle = {};
@@ -71,17 +68,26 @@ namespace util
 		{
 		public:
 			void SetPreviousLineAnchorStartPoint(LineStartAnchorPoint &anchor);
-			void SetNextLineAnchorStartPoint(LineStartAnchorPoint &anchor);
 			void ClearPreviousLineAnchorStartPoint();
-			void ClearNextLineAnchorStartPoint();
-
 			LineStartAnchorPoint *GetPreviousLineAnchorStartPoint();
+
+			void SetNextLineAnchorStartPoint(LineStartAnchorPoint &anchor);
+			void ClearNextLineAnchorStartPoint();
 			LineStartAnchorPoint *GetNextLineAnchorStartPoint();
+
+			virtual bool IsLineStartAnchorPoint() const override;
+			virtual void ShiftByOffset(ShiftOffset offset) override;
+
+			std::vector<util::TWeakSharedHandle<AnchorPoint>> &GetChildren();
+			const std::vector<util::TWeakSharedHandle<AnchorPoint>> &GetChildren() const;
 		protected:
+			void RemoveChild(const AnchorPoint &anchorPoint);
+			std::vector<util::TWeakSharedHandle<AnchorPoint>> m_children = {};
 			using AnchorPoint::AnchorPoint;
 			using AnchorPoint::SetParent;
 			friend AnchorPoint;
 		private:
+			util::TWeakSharedHandle<AnchorPoint> m_prevLineAnchorStartPoint = {};
 			util::TWeakSharedHandle<AnchorPoint> m_nextLineAnchorStartPoint = {};
 		};
 	};
