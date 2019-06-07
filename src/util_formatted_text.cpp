@@ -6,6 +6,7 @@
 #include "util_formatted_text_anchor_point.hpp"
 #include "util_formatted_text_tag.hpp"
 #include <sstream>
+#include <cstring>
 #include <algorithm>
 #ifdef ENABLE_FORMATTED_TEXT_UNIT_TESTS
 	#include <functional>

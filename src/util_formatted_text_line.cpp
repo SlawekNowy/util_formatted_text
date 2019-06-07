@@ -7,6 +7,7 @@
 #include "util_formatted_text_anchor_point.hpp"
 #include <assert.h>
 #include <vector>
+#include <cstring>
 #include <algorithm>
 
 using namespace util::text;
