@@ -8,6 +8,7 @@
 #include "util_formatted_text_anchor_point.hpp"
 #include <sharedutils/util_shared_handle.hpp>
 #include <optional>
+#include <string>
 
 namespace util
 {
