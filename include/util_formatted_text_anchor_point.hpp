@@ -97,7 +97,7 @@ template<class TAnchorPoint>
 	util::TSharedHandle<TAnchorPoint> util::text::AnchorPoint::Create(FormattedTextLine &line,bool allowOutOfBounds)
 {
 	auto hAnchorPoint = util::TSharedHandle<TAnchorPoint>{new TAnchorPoint{allowOutOfBounds}};
-	hAnchorPoint->m_handle = util::TWeakSharedHandle<util::text::AnchorPoint>{hAnchorPoint.GetInternalData()};
+	hAnchorPoint->m_handle = util::shared_handle_cast<TAnchorPoint,AnchorPoint>(hAnchorPoint);
 	hAnchorPoint->SetLine(line);
 	return hAnchorPoint;
 }

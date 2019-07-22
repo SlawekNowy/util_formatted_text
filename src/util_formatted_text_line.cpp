@@ -186,7 +186,7 @@ std::vector<util::TSharedHandle<util::text::AnchorPoint>> FormattedTextLine::Det
 	{
 		if(hChild.IsValid() == false || hChild->IsValid() == false || hChild->IsInRange(startOffset,len) == false)
 			continue;
-		anchorPointsInRange.push_back(hChild);
+		anchorPointsInRange.push_back(util::claim_shared_handle_ownership(hChild));
 		hChild->ClearLine();
 		hChild->ClearParent();
 	}

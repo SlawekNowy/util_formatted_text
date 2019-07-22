@@ -13,7 +13,7 @@ AnchorPoint::AnchorPoint(TextOffset charOffset,bool allowOutOfBounds)
 	: m_wpLine{},m_charOffset{charOffset},m_bAllowOutOfBounds{allowOutOfBounds}
 {}
 
-util::TSharedHandle<AnchorPoint> AnchorPoint::GetHandle() {return m_handle;}
+util::TSharedHandle<AnchorPoint> AnchorPoint::GetHandle() {return util::claim_shared_handle_ownership(m_handle);}
 bool AnchorPoint::IsValid() const {return m_wpLine.expired() == false;}
 
 bool AnchorPoint::operator==(const AnchorPoint &other) const
@@ -64,7 +64,7 @@ void AnchorPoint::ClearParent()
 	auto offset = GetTextCharOffset();
 	auto *parent = static_cast<LineStartAnchorPoint*>(m_parent.Get());
 	parent->RemoveChild(*this);
-	m_parent = {};
+	m_parent = decltype(m_parent){};
 	SetOffset(offset); // Re-apply offset
 }
 void AnchorPoint::ClearLine()
@@ -142,7 +142,7 @@ void LineStartAnchorPoint::SetNextLineAnchorStartPoint(LineStartAnchorPoint &anc
 bool LineStartAnchorPoint::IsLineStartAnchorPoint() const {return true;}
 void LineStartAnchorPoint::ClearNextLineAnchorStartPoint()
 {
-	m_nextLineAnchorStartPoint = {};
+	m_nextLineAnchorStartPoint = decltype(m_nextLineAnchorStartPoint){};
 }
 LineStartAnchorPoint *LineStartAnchorPoint::GetNextLineAnchorStartPoint()
 {
@@ -150,7 +150,7 @@ LineStartAnchorPoint *LineStartAnchorPoint::GetNextLineAnchorStartPoint()
 }
 void LineStartAnchorPoint::ClearPreviousLineAnchorStartPoint()
 {
-	m_prevLineAnchorStartPoint = {};
+	m_prevLineAnchorStartPoint = decltype(m_nextLineAnchorStartPoint){};
 }
 void LineStartAnchorPoint::SetPreviousLineAnchorStartPoint(LineStartAnchorPoint &anchor)
 {
