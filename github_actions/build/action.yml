@@ -43,3 +43,4 @@ runs:
         build_target: util_formatted_text
         build_dir: '${{ matrix.config.build_dir }}/${{ inputs.dir }}'
         cmake_script_location: '${{ inputs.dir }}'
+        static_library: '1'
