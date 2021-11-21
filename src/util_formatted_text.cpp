@@ -308,6 +308,14 @@ void FormattedText::RemoveLine(LineIndex lineIdx,bool preserveTags)
 	{
 		for(auto &tagComponent : line.GetTagComponents())
 			strTagComponents += tagComponent->GetTagString(*this);
+
+		while(!strTagComponents.empty() && strTagComponents.front() == '\n')
+		{
+			// TODO: This should never happen under normal circumstances, but due to a bug where the tag anchors can refer
+			// to incorrect positions, it does happen sometimes, which can cause an infinite loop.
+			// This is a temporary work-around until that bug is fixed.
+			strTagComponents.erase(strTagComponents.begin());
+		}
 	}
 
 	auto pline = m_textLines.at(lineIdx);
