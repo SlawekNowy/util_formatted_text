@@ -7,6 +7,7 @@
 #include "util_formatted_text_tag.hpp"
 #include <sstream>
 #include <cstring>
+#include <cassert>
 #include <algorithm>
 #ifdef ENABLE_FORMATTED_TEXT_UNIT_TESTS
 	#include <functional>
@@ -15,7 +16,7 @@
 #endif
 
 using namespace util::text;
-
+#pragma optimize("",off)
 std::shared_ptr<FormattedText> FormattedText::Create(const std::string_view &text)
 {
 	auto ftext = std::shared_ptr<FormattedText>{new FormattedText{}};
@@ -446,9 +447,13 @@ void FormattedText::RemoveEmptyTags(util::text::LineIndex lineIndex,bool fromEnd
 			auto result = outerRange.has_value();
 			if(result == true)
 			{
-				skip = true;
-				result = RemoveText(outerRange->first,outerRange->second -outerRange->first);
-				skip = false;
+				assert(outerRange->second >= outerRange->first);
+				if(outerRange->second >= outerRange->first)
+				{
+					skip = true;
+					result = RemoveText(outerRange->first,outerRange->second -outerRange->first);
+					skip = false;
+				}
 			}
 			if(result)
 				RemoveEmptyTags(lineIndex); // Restart in case m_tags array has been changed
@@ -1524,3 +1529,4 @@ bool FormattedText::Validate(std::stringstream &msg) const
 	return true;
 }
 #endif
+#pragma optimize("",on)
