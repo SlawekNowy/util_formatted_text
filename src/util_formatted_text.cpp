@@ -694,14 +694,16 @@ bool FormattedText::InsertText(const std::string_view &text,LineIndex lineIdx,Ch
 {
 	if(text.empty())
 		return true;
-	if(lineIdx == LAST_LINE)
-		lineIdx = m_textLines.size();
-	if(lineIdx > m_textLines.size() || (lineIdx == m_textLines.size() && charOffset != LAST_CHAR))
-		return false;
 	std::vector<PFormattedTextLine> lines {};
 	ParseText(text,lines);
 	if(lines.empty())
 		return true;
+	while(m_textLines.size() +lines.size() > m_maxLineCount)
+		PopFrontLine(); // TODO: This may cause an infinite loop in some cases?
+	if(lineIdx == LAST_LINE)
+		lineIdx = m_textLines.size();
+	if(lineIdx > m_textLines.size() || (lineIdx == m_textLines.size() && charOffset != LAST_CHAR))
+		return false;
 	if(lineIdx == m_textLines.size())
 	{
 		auto newLine = FormattedTextLine::Create(*this);

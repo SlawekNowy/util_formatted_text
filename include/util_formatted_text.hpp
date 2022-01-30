@@ -69,6 +69,9 @@ namespace util
 			const std::string &GetUnformattedText() const;
 			const std::string &GetFormattedText() const;
 
+			uint32_t GetMaxLineCount() const {return m_maxLineCount;}
+			void SetMaxLineCount(uint32_t c) {m_maxLineCount = c;}
+
 			void SetCallbacks(const Callbacks &callbacks);
 
 			std::optional<TextOffset> GetTextCharOffset(LineIndex lineIdx,CharOffset charOffset) const;
@@ -121,6 +124,7 @@ namespace util
 				std::string formattedText = "";
 			} mutable m_textInfo = {};
 			mutable bool m_bDirty = true;
+			uint32_t m_maxLineCount = std::numeric_limits<uint32_t>::max();
 			std::vector<PFormattedTextLine> m_textLines = {};
 			std::vector<LineIndex> m_formattedOffsetToLineIndex = {};
 			std::vector<LineIndex> m_unformattedOffsetToLineIndex = {};
