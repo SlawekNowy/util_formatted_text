@@ -8,6 +8,7 @@
 #include "util_formatted_text_config.hpp"
 #include "util_text_line.hpp"
 #include <sharedutils/util_shared_handle.hpp>
+#include <sharedutils/util_utf8.hpp>
 #include <optional>
 #include <memory>
 
@@ -33,10 +34,10 @@ namespace util
 			const TextLine &GetUnformattedLine() const;
 			TextLine &GetUnformattedLine();
 
-			CharOffset AppendString(const std::string_view &str);
-			std::optional<CharOffset> InsertString(const std::string_view &str,CharOffset charOffset);
-			std::string_view Substr(CharOffset offset,TextLength len=UNTIL_THE_END) const;
-			std::optional<TextLength> Erase(CharOffset startOffset,TextLength len=UNTIL_THE_END,std::string *outErasedString=nullptr);
+			CharOffset AppendString(const util::Utf8StringView &str);
+			std::optional<CharOffset> InsertString(const util::Utf8StringView &str,CharOffset charOffset);
+			util::Utf8StringView Substr(CharOffset offset,TextLength len=UNTIL_THE_END) const;
+			std::optional<TextLength> Erase(CharOffset startOffset,TextLength len=UNTIL_THE_END,util::Utf8String *outErasedString=nullptr);
 			bool Move(CharOffset startOffset,TextLength len,FormattedTextLine &moveTarget,CharOffset targetCharOffset=LAST_CHAR);
 			
 			std::vector<util::TSharedHandle<TextTagComponent>> &GetTagComponents();
@@ -64,7 +65,7 @@ namespace util
 			CharOffset GetUnformattedCharOffset(CharOffset offset) const;
 			util::TSharedHandle<AnchorPoint> CreateAnchorPoint(CharOffset charOffset,bool allowOutOfBounds=false);
 
-			void AppendCharacter(char c);
+			void AppendCharacter(int32_t c);
 			TextLine &Format();
 			FormattedText &GetTargetText() const;
 
@@ -83,7 +84,7 @@ namespace util
 			void ShiftAnchors(CharOffset startOffset,TextLength len,ShiftOffset shiftAmount,TextLength oldLineLen);
 			std::vector<TSharedHandle<AnchorPoint>> DetachAnchorPoints(CharOffset startOffset,TextLength len=UNTIL_THE_END);
 			void AttachAnchorPoints(std::vector<TSharedHandle<AnchorPoint>> &anchorPoints,ShiftOffset shiftOffset=0);
-			util::TSharedHandle<TextTagComponent> ParseTagComponent(CharOffset offset,const std::string_view &str);
+			util::TSharedHandle<TextTagComponent> ParseTagComponent(CharOffset offset,const util::Utf8StringView &str);
 			friend FormattedText;
 			friend AnchorPoint;
 		private:

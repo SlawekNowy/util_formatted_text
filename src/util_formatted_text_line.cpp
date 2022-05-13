@@ -104,14 +104,14 @@ bool FormattedTextLine::IsInRange(TextOffset offset,TextLength len) const
 }
 std::optional<char> FormattedTextLine::GetChar(CharOffset offset) const {return m_unformattedLine.GetChar(offset);}
 
-CharOffset FormattedTextLine::AppendString(const std::string_view &str)
+CharOffset FormattedTextLine::AppendString(const util::Utf8StringView &str)
 {
 	auto charOffset = GetLength();
 	auto success = InsertString(str,charOffset);
 	assert(success);
 	return charOffset;
 }
-std::optional<CharOffset> FormattedTextLine::InsertString(const std::string_view &str,CharOffset charOffset)
+std::optional<CharOffset> FormattedTextLine::InsertString(const util::Utf8StringView &str,CharOffset charOffset)
 {
 	if(charOffset == LAST_CHAR)
 		charOffset = GetLength();
@@ -125,7 +125,7 @@ std::optional<CharOffset> FormattedTextLine::InsertString(const std::string_view
 	return charOffset;
 }
 
-std::string_view FormattedTextLine::Substr(CharOffset offset,TextLength len) const
+util::Utf8StringView FormattedTextLine::Substr(CharOffset offset,TextLength len) const
 {
 	return m_unformattedLine.Substr(offset,len);
 }
@@ -162,7 +162,7 @@ void FormattedTextLine::ShiftAnchors(CharOffset startOffset,TextLength len,Shift
 		nextLineAnchorPoint->ShiftByOffset(shiftAmount);
 }
 
-std::optional<TextLength> FormattedTextLine::Erase(CharOffset startOffset,TextLength len,std::string *outErasedString)
+std::optional<TextLength> FormattedTextLine::Erase(CharOffset startOffset,TextLength len,util::Utf8String *outErasedString)
 {
 	auto lenLine = GetAbsLength();
 	auto numErased = m_unformattedLine.Erase(startOffset,len,outErasedString);
@@ -208,7 +208,7 @@ bool FormattedTextLine::Move(CharOffset startOffset,TextLength len,FormattedText
 	// Temporarily remove all anchor points within the move range from this line
 	auto anchorPointsInMoveRange = DetachAnchorPoints(startOffset,len);
 
-	std::string erasedString;
+	util::Utf8String erasedString;
 	if(Erase(startOffset,len,&erasedString) == false || moveTarget.InsertString(erasedString,targetCharOffset) == false)
 		return false;
 	// Add the removed anchor points to the target line and update their offsets accordingly
@@ -216,7 +216,7 @@ bool FormattedTextLine::Move(CharOffset startOffset,TextLength len,FormattedText
 	return true;
 }
 
-void FormattedTextLine::AppendCharacter(char c)
+void FormattedTextLine::AppendCharacter(int32_t c)
 {
 	auto len = GetLength();
 	auto absLen = GetAbsLength();
@@ -241,7 +241,7 @@ TextLine &FormattedTextLine::Format()
 	m_unformattedCharIndexToFormatted.resize(m_unformattedLine.GetAbsLength());
 	m_formattedCharIndexToUnformatted.reserve(m_unformattedLine.GetAbsLength());
 	auto lineStartOffset = GetStartOffset();
-	auto lineView = std::string_view{m_unformattedLine.GetText()};
+	auto lineView = util::Utf8StringView{m_unformattedLine.GetText()};
 
 	auto curTagIdx = 0u;
 	TextOffset offset = 0u;
@@ -302,9 +302,9 @@ util::TSharedHandle<AnchorPoint> FormattedTextLine::CreateAnchorPoint(CharOffset
 	return anchorPoint;
 }
 
-util::TSharedHandle<TextTagComponent> FormattedTextLine::ParseTagComponent(CharOffset offset,const std::string_view &str)
+util::TSharedHandle<TextTagComponent> FormattedTextLine::ParseTagComponent(CharOffset offset,const util::Utf8StringView &str)
 {
-	if(str.empty() || strncmp(str.data(),TextTag::TAG_PREFIX.data(),TextTag::TAG_PREFIX.length()) != 0 || str.length() < (TextTag::TAG_PREFIX.length() +TextTag::TAG_POSTFIX.length()))
+	if(str.empty() || !util::utf8_strncmp(str.c_str(),TextTag::TAG_PREFIX.data(),TextTag::TAG_PREFIX.length()) || str.length() < (TextTag::TAG_PREFIX.length() +TextTag::TAG_POSTFIX.length()))
 		return {};
 	auto isClosingTag = false;
 	enum class Stage : uint8_t
@@ -322,7 +322,7 @@ util::TSharedHandle<TextTagComponent> FormattedTextLine::ParseTagComponent(CharO
 	auto bStringInQuotes = false;
 	while(curOffset < str.length())
 	{
-		auto token = str.at(curOffset);
+		auto token = str.get(curOffset);
 		auto controlToken = token;
 		if(bStringInQuotes && token != '\0' && token != '\"')
 			controlToken = ' '; // Arbitrary token which must reach 'default' branch

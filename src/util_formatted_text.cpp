@@ -17,25 +17,25 @@
 
 using namespace util::text;
 #pragma optimize("",off)
-std::shared_ptr<FormattedText> FormattedText::Create(const std::string_view &text)
+std::shared_ptr<FormattedText> FormattedText::Create(const util::Utf8StringView &text)
 {
 	auto ftext = std::shared_ptr<FormattedText>{new FormattedText{}};
 	ftext->AppendText(text);
 	return ftext;
 }
 
-void FormattedText::SetText(const std::string_view &text)
+void FormattedText::SetText(const util::Utf8StringView &text)
 {
 	Clear();
 	AppendText(text);
 }
-std::string FormattedText::Substr(TextOffset startOffset,TextLength len) const
+util::Utf8String FormattedText::Substr(TextOffset startOffset,TextLength len) const
 {
 	auto relOffset = GetRelativeCharOffset(startOffset);
 	if(relOffset.has_value() == false)
 		return "";
-	std::string result = "";
-	result.reserve(len +m_textLines.size());
+	util::Utf8String result = "";
+	// result.reserve(len +m_textLines.size());
 	auto lineIndex = relOffset->first;
 	auto relCharOffset = relOffset->second;
 	auto first = true;
@@ -71,16 +71,18 @@ void FormattedText::Clear()
 	if(m_callbacks.onTagsCleared)
 		m_callbacks.onTagsCleared();
 }
-bool FormattedText::operator==(const std::string_view &text) const
+bool FormattedText::operator==(const util::Utf8StringView &text) const
 {
 	TextOffset offset = 0;
+	auto it = text.begin();
 	for(auto lineIdx=decltype(m_textLines.size()){0u};lineIdx<m_textLines.size();++lineIdx)
 	{
 		auto &line = m_textLines.at(lineIdx);
 		auto &lineText = line->GetUnformattedLine().GetText();
-		if(offset >= text.length() || strncmp(text.data() +offset,lineText.c_str(),lineText.length()) != 0)
+		if(offset >= text.length() || !util::utf8_strncmp(text.c_str() +offset,lineText.c_str(),lineText.length()))
 			return false;
 		offset += line->GetAbsLength();
+		it += line->GetAbsLength();
 		if(lineIdx == m_textLines.size() -1)
 		{
 			if((offset -1) != text.length())
@@ -89,8 +91,8 @@ bool FormattedText::operator==(const std::string_view &text) const
 	}
 	return text.empty();
 }
-bool FormattedText::operator!=(const std::string_view &text) const {return operator==(text) == false;}
-FormattedText::operator std::string() const {return GetUnformattedText();}
+bool FormattedText::operator!=(const util::Utf8StringView &text) const {return operator==(text) == false;}
+FormattedText::operator util::Utf8String() const {return GetUnformattedText();}
 util::TSharedHandle<AnchorPoint> FormattedText::CreateAnchorPoint(LineIndex lineIdx,CharOffset charOffset,bool allowOutOfBounds)
 {
 	if(lineIdx >= m_textLines.size())
@@ -138,13 +140,13 @@ std::optional<TextOffset> FormattedText::GetUnformattedTextOffset(TextOffset off
 	return {};
 }
 
-const std::string &FormattedText::GetUnformattedText() const
+const util::Utf8String &FormattedText::GetUnformattedText() const
 {
 	UpdateTextInfo();
 	return m_textInfo.unformattedText;
 }
 
-const std::string &FormattedText::GetFormattedText() const
+const util::Utf8String &FormattedText::GetFormattedText() const
 {
 	UpdateTextInfo();
 	return m_textInfo.formattedText;
@@ -304,7 +306,7 @@ void FormattedText::RemoveLine(LineIndex lineIdx,bool preserveTags)
 
 	// Find tags located in removed line, these will have to be moved into the next
 	// or previous line
-	std::string strTagComponents {};
+	util::Utf8String strTagComponents {};
 	if(preserveTags == true && ShouldPreserveTagsOnLineRemoval())
 	{
 		for(auto &tagComponent : line.GetTagComponents())
@@ -588,7 +590,7 @@ bool FormattedText::MoveText(LineIndex lineIdx,CharOffset startOffset,TextLength
 	for(auto &hAnchorPoint : srcAnchorPoints)
 		anchorPointOffsets.push_back(hAnchorPoint->GetTextCharOffset() -absStartOffset);
 
-	auto text = std::string{lineSrc.Substr(startOffset,len)};
+	auto text = lineSrc.Substr(startOffset,len).to_str();
 	auto tgtAnchorOffset = tgtAnchor->GetTextCharOffset();
 
 	if(RemoveText(lineIdx,startOffset,len) == false || tgtAnchor.IsExpired())
@@ -674,12 +676,12 @@ LineIndex FormattedText::InsertLine(FormattedTextLine &line,LineIndex lineIdx)
 	OnLineAdded(*m_textLines.at(lineIdx));
 	return lineIdx;
 }
-void FormattedText::AppendText(const std::string_view &text) {InsertText(text,m_textLines.empty() ? LAST_LINE : (m_textLines.size() -1),LAST_CHAR);}
-void FormattedText::AppendLine(const std::string_view &line)
+void FormattedText::AppendText(const util::Utf8StringView &text) {InsertText(text,m_textLines.empty() ? LAST_LINE : (m_textLines.size() -1),LAST_CHAR);}
+void FormattedText::AppendLine(const util::Utf8StringView &line)
 {
-	auto strLine = std::string{line};
+	auto strLine = line.to_str();
 	if(m_textLines.empty() == false)
-		strLine = '\n' +strLine;
+		strLine = util::Utf8String{"\n"} +strLine;
 	InsertText(strLine,m_textLines.size());
 }
 void FormattedText::PopFrontLine() {RemoveLine(0);}
@@ -690,7 +692,7 @@ void FormattedText::PopBackLine()
 	RemoveLine(m_textLines.size() -1);
 }
 
-bool FormattedText::InsertText(const std::string_view &text,LineIndex lineIdx,CharOffset charOffset)
+bool FormattedText::InsertText(const util::Utf8StringView &text,LineIndex lineIdx,CharOffset charOffset)
 {
 	if(text.empty())
 		return true;
@@ -711,7 +713,7 @@ bool FormattedText::InsertText(const std::string_view &text,LineIndex lineIdx,Ch
 	}
 	auto &firstLineToInsert = lines.front();
 	
-	auto postfix = std::string{m_textLines.at(lineIdx)->Substr(charOffset)};
+	auto postfix = m_textLines.at(lineIdx)->Substr(charOffset).to_str();
 	auto &targetLineToInsert = m_textLines.at(lineIdx);
 	auto anchorPointsInMoveRange = targetLineToInsert->DetachAnchorPoints(charOffset,UNTIL_THE_END);
 
@@ -746,16 +748,17 @@ bool FormattedText::InsertText(const std::string_view &text,LineIndex lineIdx,Ch
 	return true;
 }
 
-void FormattedText::ParseText(const std::string_view &text,std::vector<PFormattedTextLine> &outLines)
+void FormattedText::ParseText(const util::Utf8StringView &text,std::vector<PFormattedTextLine> &outLines)
 {
 	if(text.empty())
 		return;
 	outLines.push_back(FormattedTextLine::Create(*this));
 	auto pCurLine = outLines.back();
 	TextOffset offset = 0;
+	auto it = text.begin();
 	while(offset < text.length())
 	{
-		auto c = text.at(offset);
+		auto c = *it;
 		switch(c)
 		{
 			case '\n':
@@ -767,6 +770,7 @@ void FormattedText::ParseText(const std::string_view &text,std::vector<PFormatte
 				break;
 		}
 		++offset;
+		++it;
 	}
 }
 
@@ -786,7 +790,7 @@ void FormattedText::UnitTest()
 	};
 
 	auto allSucceeded = true;
-	std::string_view currentUnitTestName = {};
+	util::Utf8StringView currentUnitTestName = {};
 
 	const auto print_tags = [this]() {
 		for(auto &tag : m_tags)

@@ -8,7 +8,7 @@
 #include <algorithm>
 
 using namespace util::text;
-
+#pragma optimize("",off)
 AnchorPoint::AnchorPoint(TextOffset charOffset,bool allowOutOfBounds)
 	: m_wpLine{},m_charOffset{charOffset},m_bAllowOutOfBounds{allowOutOfBounds}
 {}
@@ -163,3 +163,4 @@ void LineStartAnchorPoint::SetPreviousLineAnchorStartPoint(LineStartAnchorPoint 
 	anchor.SetNextLineAnchorStartPoint(*this);
 }
 LineStartAnchorPoint *LineStartAnchorPoint::GetPreviousLineAnchorStartPoint() {return static_cast<LineStartAnchorPoint*>(m_prevLineAnchorStartPoint.Get());}
+#pragma optimize("",on)

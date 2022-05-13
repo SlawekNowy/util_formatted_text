@@ -7,6 +7,7 @@
 
 #include "util_formatted_text_anchor_point.hpp"
 #include <sharedutils/util_shared_handle.hpp>
+#include <sharedutils/util_utf8.hpp>
 #include <optional>
 #include <string>
 
@@ -29,7 +30,7 @@ namespace util
 			bool operator<=(const TextTagComponent&) const=delete;
 			bool operator>=(const TextTagComponent&) const=delete;
 
-			std::string GetTagString(const FormattedText &text) const;
+			util::Utf8String GetTagString(const FormattedText &text) const;
 			const AnchorPoint *GetStartAnchorPoint() const;
 			AnchorPoint *GetStartAnchorPoint();
 			const AnchorPoint *GetEndAnchorPoint() const;
@@ -76,10 +77,10 @@ namespace util
 			bool IsClosed() const;
 			std::optional<std::pair<TextOffset,TextLength>> GetInnerRange() const;
 			std::optional<std::pair<TextOffset,TextLength>> GetOuterRange() const;
-			std::string GetTagContents() const;
-			std::string GetTagString() const;
-			std::string GetOpeningTag() const;
-			std::string GetClosingTag() const;
+			util::Utf8String GetTagContents() const;
+			util::Utf8String GetTagString() const;
+			util::Utf8String GetOpeningTag() const;
+			util::Utf8String GetClosingTag() const;
 			void SetClosingTagComponent(const util::TSharedHandle<TextTagComponent> &closingTag);
 			const TextOpeningTagComponent *GetOpeningTagComponent() const;
 			TextOpeningTagComponent *GetOpeningTagComponent();

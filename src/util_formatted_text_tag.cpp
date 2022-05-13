@@ -6,7 +6,7 @@
 #include "util_formatted_text.hpp"
 
 using namespace util::text;
-
+#pragma optimize("",off)
 const decltype(TextTag::TAG_PREFIX) TextTag::TAG_PREFIX = "{[";
 const decltype(TextTag::TAG_POSTFIX) TextTag::TAG_POSTFIX = "]}";
 
@@ -29,7 +29,7 @@ bool TextTagComponent::operator>(const TextTagComponent &other) const
 {
 	return IsValid() && *m_startAnchor > *other.m_endAnchor;
 }
-std::string TextTagComponent::GetTagString(const FormattedText &text) const
+util::Utf8String TextTagComponent::GetTagString(const FormattedText &text) const
 {
 	if(m_startAnchor.IsExpired() || m_endAnchor.IsExpired())
 		return {};
@@ -116,27 +116,27 @@ std::optional<std::pair<TextOffset,TextLength>> TextTag::GetOuterRange() const
 	auto len = endOffset -startOffset +1;
 	return {{startOffset,len}};
 }
-std::string TextTag::GetTagContents() const
+util::Utf8String TextTag::GetTagContents() const
 {
 	if(IsValid() == false)
 		return {};
 	auto range = GetInnerRange();
 	return m_wpText.lock()->Substr(range->first,range->second);
 }
-std::string TextTag::GetTagString() const
+util::Utf8String TextTag::GetTagString() const
 {
 	if(IsValid() == false)
 		return {};
 	auto range = GetOuterRange();
 	return m_wpText.lock()->Substr(range->first,range->second);
 }
-std::string TextTag::GetOpeningTag() const
+util::Utf8String TextTag::GetOpeningTag() const
 {
 	if(m_wpText.expired())
 		return "";
 	return m_openingTag->GetTagString(*m_wpText.lock());
 }
-std::string TextTag::GetClosingTag() const
+util::Utf8String TextTag::GetClosingTag() const
 {
 	if(m_wpText.expired())
 		return "";
@@ -147,3 +147,4 @@ const TextOpeningTagComponent *TextTag::GetOpeningTagComponent() const {return c
 TextOpeningTagComponent *TextTag::GetOpeningTagComponent() {return static_cast<TextOpeningTagComponent*>(m_openingTag.Get());}
 const TextTagComponent *TextTag::GetClosingTagComponent() const {return const_cast<TextTag*>(this)->GetClosingTagComponent();}
 TextTagComponent *TextTag::GetClosingTagComponent() {return m_closingTag.Get();}
+#pragma optimize("",on)
