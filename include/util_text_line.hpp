@@ -42,6 +42,7 @@ namespace util
 			util::Utf8StringView Substr(CharOffset offset,TextLength len=UNTIL_THE_END) const;
 
 			TextLine &operator=(const util::Utf8String &line);
+            TextLine &operator=(const std::string &line) {return operator=(util::Utf8String{line});}
 			bool operator==(const util::Utf8StringView &line);
 			bool operator!=(const util::Utf8StringView &line);
 			operator const util::Utf8String&() const;
