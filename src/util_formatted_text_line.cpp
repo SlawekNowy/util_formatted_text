@@ -54,7 +54,7 @@ void FormattedTextLine::AttachAnchorPoint(AnchorPoint &anchorPoint)
 	auto it = std::find_if(m_anchorPoints.begin(),m_anchorPoints.end(),[&anchorPoint](const util::TWeakSharedHandle<AnchorPoint> &hAnchorPoint) {
 		return hAnchorPoint.Get() == &anchorPoint;
 	});
-	m_anchorPoints.push_back(anchorPoint.GetHandle());
+    m_anchorPoints.push_back(util::TWeakSharedHandle<util::text::AnchorPoint>{anchorPoint.GetHandle()});
 }
 
 const TextLine &FormattedTextLine::GetFormattedLine() const {return const_cast<FormattedTextLine*>(this)->GetFormattedLine();}
